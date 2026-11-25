@@ -1,0 +1,36 @@
+name: Bootes stable Health image
+on:
+  push:
+    branches: ['stable/1.37.5-health']
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: write
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Build AMD64 image
+        run: docker buildx build --platform linux/amd64 --load --build-arg VW_VERSION=1.37.5 --tag ghcr.io/mtylerb/vaultwarden:1.37.5-health.1 .
+      - name: Verify native feature flag
+        run: |
+          set -euo pipefail
+          docker run -d --name vw-test -p 127.0.0.1:18080:80 -e EXPERIMENTAL_CLIENT_FEATURE_FLAGS=pm-35928-premium-user-health-reports ghcr.io/mtylerb/vaultwarden:1.37.5-health.1
+          trap 'docker logs vw-test; docker rm -fv vw-test' EXIT
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:18080/api/config > /tmp/vw-config.json; then break; fi
+            sleep 2
+          done
+          jq -e '.featureStates["pm-35928-premium-user-health-reports"] == true' /tmp/vw-config.json
+          docker exec vw-test /vaultwarden --version
+      - name: Publish tested image
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker push ghcr.io/mtylerb/vaultwarden:1.37.5-health.1
