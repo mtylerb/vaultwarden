@@ -20,10 +20,12 @@ jobs:
       - name: Verify native feature flag
         run: |
           set -euo pipefail
-          docker run -d --name vw-test -p 127.0.0.1:18080:80 -e EXPERIMENTAL_CLIENT_FEATURE_FLAGS=pm-35928-premium-user-health-reports ghcr.io/mtylerb/vaultwarden:1.37.5-health.1
+          mkdir -p "$RUNNER_TEMP/vw-test-data"
+          docker run -d --name vw-test -v "$RUNNER_TEMP/vw-test-data:/data" -p 127.0.0.1:18080:80 -e EXPERIMENTAL_CLIENT_FEATURE_FLAGS=pm-35928-premium-user-health-reports ghcr.io/mtylerb/vaultwarden:1.37.5-health.1
           trap 'docker logs vw-test; docker rm -fv vw-test' EXIT
           for i in $(seq 1 60); do
             if curl -fsS http://127.0.0.1:18080/api/config > /tmp/vw-config.json; then break; fi
+            if [ "$(docker inspect -f '{{.State.Running}}' vw-test)" != true ]; then exit 1; fi
             sleep 2
           done
           jq -e '.featureStates["pm-35928-premium-user-health-reports"] == true' /tmp/vw-config.json
